@@ -40,19 +40,18 @@ def load_model(model_name, device, encoder_choice='vitl'):
     else:
         raise ValueError(f"Model {model_name} not implemented.")
 
-def get_relative_depth(raw_image, input_size, model):
+def get_relative_depth(image, model):
     """
     Preprocess the image and call the model's inference method.
     Returns the relative depth map as a 2D numpy array.
     """
-    processed_image = cv2.resize(raw_image, (input_size, input_size))
     # Call the model's inference function (assumed to be infer_image)
-    depth = model.infer_image(processed_image, input_size)
+    depth = model.infer_image(image)
     return depth
 
-def model_callable(raw_image, input_size, model):
+def model_callable(raw_image, model):
     """
     This function wraps get_relative_depth so it can be passed to the evaluation function.
     It takes an image and returns the relative depth map.
     """
-    return get_relative_depth(raw_image, input_size, model)
+    return get_relative_depth(raw_image, model)
