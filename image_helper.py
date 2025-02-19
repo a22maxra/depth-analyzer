@@ -16,7 +16,7 @@ def load_mat_file_images(file_path):
 def load_mat_file_depths(file_path):
     data = loadmat(file_path)
     depths = data['depths']
-    print(f"\nImages shape: {depths.shape}")       
+    print(f"\nDepth shape: {depths.shape}")       
     return depths
 
 def inspect_mat_file(file_path):
@@ -42,6 +42,20 @@ def save_depth(depth, name="output_depth.png"):
     print("\nSaving depth map as ", name)
     plt.imsave(name, depth, cmap='Spectral')
 
+def load_mat_dataset(file_path):
+    import scipy.io
+    data = scipy.io.loadmat(file_path)
+    images_arr = data['images']   # shape: (448, 608, 3, 10)
+    depths_arr = data['depths']     # shape: (448, 608, 10)
+    
+    dataset = []
+    num_images = images_arr.shape[3]
+    for i in range(num_images):
+        image = images_arr[:, :, :, i]  # shape: (448, 608, 3)
+        depth = depths_arr[:, :, i]       # shape: (448, 608)
+        dataset.append((image, depth))
+    return dataset
+
 def print_reduced_depth_map(depth, block_size=100):
     # Get the original dimensions
     depth = depth.astype(np.uint8)
@@ -65,15 +79,15 @@ def inverse_rel_depth_to_true_depth(depth_rel, depth_abs):
     """
     Convert a normalized inverse depth map to true depth using the formula:
     
-        True Depth = 1 / (A * V_norm + B)
+        True Depth = 1 / (A * depth_rel_norm + B)
     
     where:
         A = (1/d_min - 1/d_max)
         B = 1/d_max
-        V_norm is the normalized inverse depth (range 0 to 1)
+        depth_rel_norm is the normalized inverse depth (range 0 to 1)
     
     Args:
-        depth_norm (np.array): Normalized inverse depth map (values between 0 and 1).
+        depth_rel_norm (np.array): Normalized inverse depth map (values between 0 and 1).
         d_min (float): Known minimum true depth (closest point in meters).
         d_max (float): Known maximum true depth (farthest point in meters).
     
@@ -113,3 +127,103 @@ def compute_absolute_error(depth_pred, depth_gt):
     # Return the mean absolute error (MAE)
     mae = np.mean(abs_error)
     return mae
+
+def convert_inverse_depth(inv_depth):
+    epsilon = 1e-6 # Epsilon avoids dividing by 0
+    return 1 / (inv_depth + epsilon)
+
+def compute_errors(gt, pred):
+    """
+    Compute error metrics between ground truth and predicted depth.
+    """
+    thresh = np.maximum(gt / pred, pred / gt)
+    a1 = (thresh < 1.25).mean()
+    a2 = (thresh < 1.25**2).mean()
+    a3 = (thresh < 1.25**3).mean()
+    rmse = np.sqrt(np.mean((gt - pred) ** 2))
+    rmse_log = np.sqrt(np.mean((np.log(gt) - np.log(pred)) ** 2))
+    abs_rel = np.mean(np.abs(gt - pred) / gt)
+    sq_rel = np.mean(((gt - pred) ** 2) / gt)
+    return {
+        "abs_rel": abs_rel,
+        "sq_rel": sq_rel,
+        "rmse": rmse,
+        "rmse_log": rmse_log,
+        "a1": a1,
+        "a2": a2,
+        "a3": a3
+    }
+
+def evaluate_model_on_dataset(model, dataset, do_convert=True,
+                              min_depth=1e-3, max_depth=80.0, use_median_scaling=True):
+    """
+    Evaluate a monocular depth estimation model on a dataset that may include infinite depths.
+    
+    Parameters:
+      model: A callable that takes an input image and returns a prediction.
+      dataset: An iterable that yields (image, gt_depth) pairs, where gt_depth is a 2D numpy array.
+      do_convert (bool): If True, convert the model output assuming it is an inverse depth map.
+      min_depth (float): Minimum valid depth value.
+      max_depth (float): Maximum valid depth value.
+      use_median_scaling (bool): Whether to perform median scaling for each sample.
+    
+    Returns:
+      dict: Aggregated error metrics across the dataset.
+    """
+    errors_list = []
+    scaling_ratios = []
+    
+    # Define the conversion function in place if needed
+    def convert_inverse_depth(inv_depth):
+        epsilon = 1e-6  # to avoid division by zero
+        return 1.0 / (inv_depth + epsilon)
+    
+    for image, gt_depth in dataset:
+        # Obtain model prediction
+        pred_output = model(image)
+        
+        # If do_convert is True, convert inverse depth to depth
+        if do_convert:
+            pred_depth = convert_inverse_depth(pred_output)
+        else:
+            pred_depth = pred_output
+        
+        # Ensure predictions are finite (replace non-finite with max_depth)
+        pred_depth = np.where(np.isfinite(pred_depth), pred_depth, max_depth)
+        
+        # Create a valid mask: use only ground truth pixels that are finite and in range.
+        valid_mask = np.logical_and.reduce((
+            np.isfinite(gt_depth),
+            gt_depth > min_depth,
+            gt_depth < max_depth
+        ))
+        
+        if not np.any(valid_mask):
+            continue
+        
+        pred_depth_valid = pred_depth[valid_mask]
+        gt_depth_valid = gt_depth[valid_mask]
+        
+        # Optional median scaling to align the prediction's scale with ground truth
+        if use_median_scaling:
+            median_gt = np.median(gt_depth_valid)
+            median_pred = np.median(pred_depth_valid)
+            ratio = median_gt / median_pred
+            scaling_ratios.append(ratio)
+            pred_depth_valid = pred_depth_valid * ratio
+        
+        # Clip predictions to valid range
+        pred_depth_valid = np.clip(pred_depth_valid, min_depth, max_depth)
+        
+        # Compute errors for the current sample
+        errors = compute_errors(gt_depth_valid, pred_depth_valid)
+        errors_list.append(errors)
+    
+    # Aggregate errors over all samples
+    aggregated_errors = {k: np.mean([e[k] for e in errors_list]) for k in errors_list[0].keys()}
+    
+    if use_median_scaling:
+        print("Median scaling ratios:", scaling_ratios)
+        print("Mean scaling ratio:", np.mean(scaling_ratios))
+    
+    return aggregated_errors

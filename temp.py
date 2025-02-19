@@ -1,43 +1,30 @@
-import h5py
-import numpy as np
-import matplotlib
-import matplotlib.pyplot as plt
-from image_helper import *
 import scipy.io
-matplotlib.use('TkAgg')
+import numpy as np
 
-# # open output_image_mat.png
-# img = plt.imread('output_image_mat.png')
+def create_mat_subset(original_mat_path, new_mat_path, n=10):
+    """
+    Loads the .mat file at original_mat_path and saves a new .mat file at new_mat_path
+    containing only the first n images and their corresponding depths.
+    
+    Assumes that the original .mat file has keys 'images' and 'depths' where:
+      - 'images' has shape (H, W, C, N)
+      - 'depths' has shape (H, W, N) or (H, W, 1, N)
+    """
+    data = scipy.io.loadmat(original_mat_path)
+    # Adjust these keys if needed.
+    images = data['images']   # shape: (H, W, C, N)
+    depths = data['depths']   # shape: (H, W, N) or maybe (H, W, 1, N)
+    
+    # Extract the first n images and depths.
+    images_subset = images[:, :, :, :n]
+    depths_subset = depths[:, :, :n] if depths.ndim == 3 else depths[:, :, 0, :n]
+    
+    # Save to a new .mat file.
+    new_data = {'images': images_subset, 'depths': depths_subset}
+    scipy.io.savemat(new_mat_path, new_data)
+    print(f"Saved subset with {n} images to {new_mat_path}")
 
-# # shape of image
-# print("Shape of image: ", img.shape)
-
-with h5py.File('nyu_depth_v2_labeled.mat', 'r') as f:
-    # Load datasets
-    images = f['images']
-    depths = f['depths']
-    labels = f['labels']
-    instances = f['instances']
-
-    print(f"\n Keys in the file: {list(f.keys())} ")
-
-    # Correct MATLAB's column-major order to (Height, Width, Channels, NumImages)
-    images_arr = np.array(images)                       # Current shape: (1449, 3, 640, 480)
-    images_arr = np.transpose(images_arr, (3, 2, 1, 0))
-    print(f"\nRaw images shape: {images.shape}")        # (1449, 3, 640, 480)
-    print("Corrected images shape:", images_arr.shape)  # Should be (480, 640, 3, 1449)
-
-    depths_arr = np.array(depths)                       # Current shape: (1449, 640, 480)
-    depths_arr = np.transpose(depths_arr, (2, 1, 0))
-    print(f"\nRaw depths shape: {depths.shape}")        # (1449, 640, 480)
-    print("Corrected depths shape:", depths_arr.shape)  # Should be (480, 640, 1449)
-
-    crop = 16
-    images_cropped = images_arr[crop:-crop, crop:-crop, :, :]
-    depths_cropped = depths_arr[crop:-crop, crop:-crop, :]
-
-    scipy.io.savemat('nyu_depth_v2_cropped.mat', {
-    'images': images_cropped,
-    'depths': depths_cropped,
-    # include other variables as needed (e.g., 'labels', 'instances')
-    })
+if __name__ == '__main__':
+    original_mat = 'nyu_depth_v2_cropped.mat'
+    new_mat = 'nyu_depth_v2_cropped_10.mat'
+    create_mat_subset(original_mat, new_mat, n=10)
