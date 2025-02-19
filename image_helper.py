@@ -155,7 +155,7 @@ def compute_errors(gt, pred):
     }
 
 def evaluate_model_on_dataset(model, dataset, do_convert=True,
-                              min_depth=1e-3, max_depth=80.0, use_median_scaling=True):
+                              min_depth=0, max_depth=80.0, use_median_scaling=True):
     """
     Evaluate a monocular depth estimation model on a dataset that may include infinite depths.
     
@@ -173,47 +173,48 @@ def evaluate_model_on_dataset(model, dataset, do_convert=True,
     errors_list = []
     scaling_ratios = []
     
-    # Define the conversion function in place if needed
+    # Convert inverse relative depth to relative depth
     def convert_inverse_depth(inv_depth):
         epsilon = 1e-6  # to avoid division by zero
         return 1.0 / (inv_depth + epsilon)
     
+    def create_valid_mask(depth_map, min_depth, max_depth):
+        return np.logical_and.reduce((
+            np.isfinite(depth_map),
+            depth_map > min_depth,
+            depth_map < max_depth
+        ))
+    
     for image, gt_depth in dataset:
         # Obtain model prediction
         pred_output = model(image)
-        
+        # Create a valid mask: use only pixels that are finite and in range.
+        pred_mask = create_valid_mask(pred_output, min_depth, max_depth = True)
+
+        if not np.any(pred_mask):
+            raise ValueError("No valid pixels in prediction mask. Model output may be invalid.")
+    
         # If do_convert is True, convert inverse depth to depth
         if do_convert:
             pred_depth = convert_inverse_depth(pred_output)
         else:
             pred_depth = pred_output
         
-        # Ensure predictions are finite (replace non-finite with max_depth)
-        pred_depth = np.where(np.isfinite(pred_depth), pred_depth, max_depth)
-        
         # Create a valid mask: use only ground truth pixels that are finite and in range.
-        valid_mask = np.logical_and.reduce((
-            np.isfinite(gt_depth),
-            gt_depth > min_depth,
-            gt_depth < max_depth
-        ))
-        
+        valid_mask = create_valid_mask(gt_depth, min_depth, max_depth)
+    
         if not np.any(valid_mask):
-            continue
+            raise ValueError("No valid pixels in ground truth mask.")
         
-        pred_depth_valid = pred_depth[valid_mask]
-        gt_depth_valid = gt_depth[valid_mask]
-        
-        # Optional median scaling to align the prediction's scale with ground truth
-        if use_median_scaling:
-            median_gt = np.median(gt_depth_valid)
-            median_pred = np.median(pred_depth_valid)
-            ratio = median_gt / median_pred
-            scaling_ratios.append(ratio)
-            pred_depth_valid = pred_depth_valid * ratio
-        
-        # Clip predictions to valid range
-        pred_depth_valid = np.clip(pred_depth_valid, min_depth, max_depth)
+        combined_mask = np.logical_and(valid_mask, pred_mask)
+        pred_depth_valid = np.ma.array(pred_depth, mask=~combined_mask)
+        gt_depth_valid = np.ma.array(gt_depth, mask=~combined_mask)
+
+        median_gt = np.median(gt_depth_valid)
+        median_pred = np.median(pred_depth_valid)
+        ratio = median_gt / median_pred
+        scaling_ratios.append(ratio)
+        pred_depth_valid = pred_depth_valid * ratio
         
         # Compute errors for the current sample
         errors = compute_errors(gt_depth_valid, pred_depth_valid)
@@ -221,9 +222,5 @@ def evaluate_model_on_dataset(model, dataset, do_convert=True,
     
     # Aggregate errors over all samples
     aggregated_errors = {k: np.mean([e[k] for e in errors_list]) for k in errors_list[0].keys()}
-    
-    if use_median_scaling:
-        print("Median scaling ratios:", scaling_ratios)
-        print("Mean scaling ratio:", np.mean(scaling_ratios))
     
     return aggregated_errors
