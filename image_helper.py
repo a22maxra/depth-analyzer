@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 from scipy.io import loadmat
+import cv2
 
 # Use an interactive backend (make sure your X server and tkinter are set up in WSL)
 matplotlib.use('TkAgg')
@@ -44,16 +45,26 @@ def save_depth(depth, name="output_depth.png"):
 
 def load_mat_dataset(file_path):
     import scipy.io
-    data = scipy.io.loadmat(file_path)
-    images_arr = data['images']   # shape: (448, 608, 3, 10)
-    depths_arr = data['depths']     # shape: (448, 608, 10)
-    
-    dataset = []
-    num_images = images_arr.shape[3]
-    for i in range(num_images):
-        image = images_arr[:, :, :, i]  # shape: (448, 608, 3)
-        depth = depths_arr[:, :, i]       # shape: (448, 608)
-        dataset.append((image, depth))
+    dataset = scipy.io.loadmat(file_path)
+    images_arr = dataset['images']   # shape: (448, 608, 3, 10)
+    depths_arr = dataset['depths']     # shape: (448, 608, 10)
+
+    # Print information for the images array
+    print("Images Array Information:")
+    print("Shape:", images_arr.shape)
+    print("Data Type:", images_arr.dtype)
+    print("Min value:", images_arr.min())
+    print("Max value:", images_arr.max())
+    print("Length (number of images):", images_arr.shape[-1])  # Assuming last dimension is number of images
+
+    # Print information for the depths array
+    print("\nDepths Array Information:")
+    print("Shape:", depths_arr.shape)
+    print("Data Type:", depths_arr.dtype)
+    print("Min value:", depths_arr.min())
+    print("Max value:", depths_arr.max())
+    print("Length (number of depth maps):", depths_arr.shape[-1])  # Assuming last dimension is number of depth maps
+
     return dataset
 
 def print_reduced_depth_map(depth, block_size=100):
@@ -133,17 +144,22 @@ def convert_inverse_depth(inv_depth):
     return 1 / (inv_depth + epsilon)
 
 def compute_errors(gt, pred):
-    """
-    Compute error metrics between ground truth and predicted depth.
-    """
-    thresh = np.maximum(gt / pred, pred / gt)
+    # Extract only the valid (unmasked) values
+    gt_valid = gt
+    pred_valid = pred
+
+    # Compute threshold ratios on the valid data
+    thresh = np.maximum(gt_valid / pred_valid, pred_valid / gt_valid)
     a1 = (thresh < 1.25).mean()
     a2 = (thresh < 1.25**2).mean()
     a3 = (thresh < 1.25**3).mean()
-    rmse = np.sqrt(np.mean((gt - pred) ** 2))
-    rmse_log = np.sqrt(np.mean((np.log(gt) - np.log(pred)) ** 2))
-    abs_rel = np.mean(np.abs(gt - pred) / gt)
-    sq_rel = np.mean(((gt - pred) ** 2) / gt)
+
+    # Compute error metrics using the valid data only
+    rmse = np.sqrt(np.mean((gt_valid - pred_valid) ** 2))
+    rmse_log = np.sqrt(np.mean((np.log(gt_valid) - np.log(pred_valid)) ** 2))
+    abs_rel = np.mean(np.abs(gt_valid - pred_valid) / gt_valid)
+    sq_rel = np.mean(((gt_valid - pred_valid) ** 2) / gt_valid)
+    
     return {
         "abs_rel": abs_rel,
         "sq_rel": sq_rel,
@@ -155,7 +171,7 @@ def compute_errors(gt, pred):
     }
 
 def evaluate_model_on_dataset(model, dataset, do_convert=True,
-                              min_depth=0, max_depth=80.0, use_median_scaling=True):
+                              min_depth=0, max_depth=80.0):
     """
     Evaluate a monocular depth estimation model on a dataset that may include infinite depths.
     
@@ -171,12 +187,12 @@ def evaluate_model_on_dataset(model, dataset, do_convert=True,
       dict: Aggregated error metrics across the dataset.
     """
     errors_list = []
-    scaling_ratios = []
-    
+    alt_errors_list = []
+
     # Convert inverse relative depth to relative depth
-    def convert_inverse_depth(inv_depth):
-        epsilon = 1e-6  # to avoid division by zero
-        return 1.0 / (inv_depth + epsilon)
+    def convert_inverse_depth(rel_depth):
+        inv_depth = 1 / rel_depth
+        return inv_depth
     
     def create_valid_mask(depth_map, min_depth, max_depth):
         return np.logical_and.reduce((
@@ -185,42 +201,76 @@ def evaluate_model_on_dataset(model, dataset, do_convert=True,
             depth_map < max_depth
         ))
     
-    for image, gt_depth in dataset:
+    images = dataset["images"].transpose(3, 0, 1, 2)
+    depths = dataset["depths"].transpose(2, 0, 1)
+
+    for image, gt_depth in zip(images, depths):
         # Obtain model prediction
         pred_output = model(image)
-        # Create a valid mask: use only pixels that are finite and in range.
-        pred_mask = create_valid_mask(pred_output, min_depth, max_depth = True)
+        # pred_output = (pred_output - pred_output.min()) / (pred_output.max() - pred_output.min()) * 255.0
+        # pred_output = pred_output.astype(np.uint8)
+        
+        # Use the same max_depth threshold for both gt and predictions.
+        pred_mask = create_valid_mask(pred_output, min_depth, max_depth)
+        gt_mask = create_valid_mask(gt_depth, min_depth, max_depth)
+        combined_mask = np.logical_and(gt_mask, pred_mask)
 
-        if not np.any(pred_mask):
-            raise ValueError("No valid pixels in prediction mask. Model output may be invalid.")
-    
-        # If do_convert is True, convert inverse depth to depth
-        if do_convert:
-            pred_depth = convert_inverse_depth(pred_output)
-        else:
-            pred_depth = pred_output
+        if not np.any(combined_mask):
+            raise ValueError("No valid pixels in combined mask. Depth map is incorrect.")
         
-        # Create a valid mask: use only ground truth pixels that are finite and in range.
-        valid_mask = create_valid_mask(gt_depth, min_depth, max_depth)
-    
-        if not np.any(valid_mask):
-            raise ValueError("No valid pixels in ground truth mask.")
-        
-        combined_mask = np.logical_and(valid_mask, pred_mask)
-        pred_depth_valid = np.ma.array(pred_depth, mask=~combined_mask)
+        # Only keep valid pixels for evaluation
+        pred_depth_valid = np.ma.array(pred_output, mask=~combined_mask)
         gt_depth_valid = np.ma.array(gt_depth, mask=~combined_mask)
 
-        median_gt = np.median(gt_depth_valid)
-        median_pred = np.median(pred_depth_valid)
-        ratio = median_gt / median_pred
-        scaling_ratios.append(ratio)
-        pred_depth_valid = pred_depth_valid * ratio
+        if do_convert:
+            pred_depth_valid = convert_inverse_depth(pred_depth_valid)
+            print("Normalized and inverted relative depth map")
         
+        median_gt = np.median(gt_depth_valid.compressed())
+        median_pred = np.median(pred_depth_valid.compressed())
+        ratio = median_gt / median_pred
+        pred_depth_valid = pred_depth_valid * ratio
+
+        # Convert in other way?
+        #
+        #
+        # Normalize the predicted inverse (or relative) depth map to [0, 1]
+        copy_depth_abs = gt_depth.copy()
+        copy_depth_rel = pred_output.copy()
+        copy_depth_rel = np.ma.array(copy_depth_rel, mask=~combined_mask)
+        copy_depth_abs = np.ma.array(copy_depth_abs, mask=~combined_mask)
+        depth_rel_norm = (copy_depth_rel - np.min(copy_depth_rel)) / (np.max(copy_depth_rel) - np.min(copy_depth_rel))
+
+        # Use the ground truth absolute depth to compute calibration parameters.
+        d_min = np.min(copy_depth_abs)
+        d_max = np.max(copy_depth_abs)
+
+        # Compute transformation parameters A and B based on the ground truth range.
+        A = (1.0 / d_min) - (1.0 / d_max)
+        B = 1.0 / d_max
+
+        # Convert the normalized predicted inverse depth to an absolute depth map.
+        predicted_depth = 1.0 / (A * depth_rel_norm + B)
+
+        # Now compute error metrics comparing the predicted absolute depth to the ground truth.
+        alt_errors = compute_errors(copy_depth_abs, predicted_depth)
+        alt_errors_list.append(alt_errors)
+
+        #
+        #
+        #
+
         # Compute errors for the current sample
         errors = compute_errors(gt_depth_valid, pred_depth_valid)
         errors_list.append(errors)
     
     # Aggregate errors over all samples
+
+    print("Alt Aggregated error metrics:")
+    alt_aggregated_errors = {k: np.mean([e[k] for e in alt_errors_list]) for k in alt_errors_list[0].keys()}
+    for key, value in alt_aggregated_errors.items():
+        print(f"{key}: {value:.4f}")
+
     aggregated_errors = {k: np.mean([e[k] for e in errors_list]) for k in errors_list[0].keys()}
     
     return aggregated_errors
