@@ -1,30 +1,81 @@
-import scipy.io
+from image_helper import *
+import matplotlib
+matplotlib.use('TkAgg')
+import matplotlib.pyplot as plt
 import numpy as np
+import torch
+from scipy.io import loadmat
+import cv2
+from image_helper import *
 
-def create_mat_subset(original_mat_path, new_mat_path, n=10):
-    """
-    Loads the .mat file at original_mat_path and saves a new .mat file at new_mat_path
-    containing only the first n images and their corresponding depths.
-    
-    Assumes that the original .mat file has keys 'images' and 'depths' where:
-      - 'images' has shape (H, W, C, N)
-      - 'depths' has shape (H, W, N) or (H, W, 1, N)
-    """
-    data = scipy.io.loadmat(original_mat_path)
-    # Adjust these keys if needed.
-    images = data['images']   # shape: (H, W, C, N)
-    depths = data['depths']   # shape: (H, W, N) or maybe (H, W, 1, N)
-    
-    # Extract the first n images and depths.
-    images_subset = images[:, :, :, :n]
-    depths_subset = depths[:, :, :n] if depths.ndim == 3 else depths[:, :, 0, :n]
-    
-    # Save to a new .mat file.
-    new_data = {'images': images_subset, 'depths': depths_subset}
-    scipy.io.savemat(new_mat_path, new_data)
-    print(f"Saved subset with {n} images to {new_mat_path}")
+# Define constants
+MIN_DEPTH = 1e-3
+MAX_DEPTH = 10.0
+EPSILON = 1e-6  # small constant to avoid division by zero
 
-if __name__ == '__main__':
-    original_mat = 'nyu_depth_v2_cropped.mat'
-    new_mat = 'nyu_depth_v2_cropped_10.mat'
-    create_mat_subset(original_mat, new_mat, n=10)
+def calculate_abs_rel(gt_depth, pred_depth):
+    """
+    Computes the Absolute Relative Error (AbsRel) between ground truth and predicted depth.
+    
+    Args:
+        gt_depth (numpy array): Ground truth depth map.
+        pred_depth (numpy array): Predicted depth map.
+        
+    Returns:
+        float: Absolute relative error.
+    """
+    abs_rel_error = np.mean(np.abs(gt_depth - pred_depth) / gt_depth)
+    return abs_rel_error
+
+def find_scale_shift(gt, pred):
+    """Compute optimal scale (s) and shift (b) using least squares."""
+    A = np.vstack([pred.flatten(), np.ones_like(pred.flatten())]).T
+    s, b = np.linalg.lstsq(A, gt.flatten(), rcond=None)[0]
+    return s, b
+
+def apply_scale_shift(pred, s, b):
+    """Apply scale and shift to predicted depth map."""
+    # s (scale) and b (shift)
+    return s * pred + b
+
+
+# Load ground truth data from the NYU Depth V2 cropped .mat file.
+images_arr = load_mat_file_images("nyu_depth_v2_cropped_10.mat")
+depths_arr = load_mat_file_depths("nyu_depth_v2_cropped_10.mat")
+
+# Extract one image and its corresponding ground truth depth.
+img = extract_image(images_arr, index=1)
+depth_abs = extract_depth(depths_arr, index=1)  # ground truth absolute depth
+
+# Load the predicted inverse depth from MDE_depth_output.mat.
+mat_data = loadmat('MDE_depth_output.mat')
+# Here we assume 'depth' holds the predicted inverse depth (after using a ReLU-like output).
+inv_rel_depth = mat_data['depth']
+
+# Create a mask to consider only valid ground truth depth values.
+mask = np.logical_and(depth_abs >= MIN_DEPTH, depth_abs <= MAX_DEPTH)
+gt_valid = depth_abs[mask]
+pred_valid = inv_rel_depth[mask]
+
+# Create a copy of the valid ground truth and predicted depth values.
+pred_valid_copy = pred_valid.copy()
+gt_valid_copy = gt_valid.copy()
+
+pred_valid_copy_2 = pred_valid.copy()
+gt_valid_copy_2 = gt_valid.copy()
+
+# Apply median scaling: adjust predicted depth so that its median matches the ground truth.
+scaling_ratio = np.median(gt_valid) / np.median(pred_valid)
+pred_valid_scaled = pred_valid * scaling_ratio
+
+# Compute and print the Absolute Relative Error.
+abs_rel_error = np.mean(np.abs(gt_valid - pred_valid_scaled) / gt_valid)
+print("Absolute Relative Error (abs_rel):", abs_rel_error, " (probably way off)")
+
+# Alternative method to compute the Absolute Relative Error.
+pred_valid_copy = inverse_rel_depth_to_true_depth(pred_valid_copy, gt_valid_copy)
+abs_rel_error = np.mean(np.abs(gt_valid_copy - pred_valid_copy) / gt_valid_copy)
+print("Absolute Relative Error (abs_rel):", abs_rel_error, " (probably more correct)")
+
+abs_rel_error = calculate_abs_rel(gt_valid_copy_2, pred_valid_copy_2)
+print("Absolute Relative Error (abs_rel):", abs_rel_error, " (trying other way)")
