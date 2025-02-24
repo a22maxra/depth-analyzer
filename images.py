@@ -1,11 +1,9 @@
-import h5py
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 from image_helper import *
 from scipy.io import loadmat
 from model_wrapper import *
-import scipy.io
 
 # Use an interactive backend
 matplotlib.use('TkAgg')
