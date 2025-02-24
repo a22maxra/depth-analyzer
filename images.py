@@ -28,7 +28,7 @@ def main():
     model_fn = lambda img: model_callable(img, model)
     
     # Evaluate the model on the dataset.
-    metrics = evaluate_model_on_dataset(model_fn, dataset, do_convert=True)
+    metrics = evaluate_model_on_dataset(model_fn, dataset)
     
     print("Aggregated error metrics:")
     for key, value in metrics.items():
