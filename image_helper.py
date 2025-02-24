@@ -5,8 +5,6 @@ import matplotlib.pyplot as plt
 from scipy.io import loadmat
 import cv2
 
-# Use an interactive backend (make sure your X server and tkinter are set up in WSL)
-matplotlib.use('TkAgg')
 
 def load_mat_file_images(file_path):
     data = loadmat(file_path)
@@ -155,7 +153,7 @@ def compute_errors(gt_valid, pred_valid):
         "a3": a3
     }
 
-def evaluate_model_on_dataset(model, dataset, min_depth=0, max_depth=80.0):
+def evaluate_model_on_dataset(model, dataset, min_depth=0, max_depth=80.0, max_images=None):
     """
     Evaluate a monocular depth estimation model on a dataset that may include infinite depths.
     
@@ -182,6 +180,12 @@ def evaluate_model_on_dataset(model, dataset, min_depth=0, max_depth=80.0):
     images = dataset["images"].transpose(3, 0, 1, 2)
     depths = dataset["depths"].transpose(2, 0, 1)
 
+    if max_images is not None:
+        if max_images > len(images) or max_images <= 0:
+            return {}
+        images = images[:max_images]
+        depths = depths[:max_images]
+
     for image, gt_depth in zip(images, depths):
         # Obtain model prediction
         pred_output = model(image)
@@ -201,6 +205,8 @@ def evaluate_model_on_dataset(model, dataset, min_depth=0, max_depth=80.0):
         errors = compute_errors(gt_depth_valid, pred_depth_valid)
         errors_list.append(errors)
 
+        # Print current progress (images so far)
+        print(f"\rProcessed {len(errors_list)} images", end="")
     aggregated_errors = {k: np.mean([e[k] for e in errors_list]) for k in errors_list[0].keys()}
     
     return aggregated_errors
