@@ -5,9 +5,6 @@ from image_helper import *
 from scipy.io import loadmat
 from model_wrapper import *
 
-# Use an interactive backend
-matplotlib.use('TkAgg')
-
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate MDE Model on .mat Dataset")
