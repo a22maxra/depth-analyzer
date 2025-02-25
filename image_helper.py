@@ -1,9 +1,7 @@
-import h5py
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 from scipy.io import loadmat
-import cv2
 
 
 def load_mat_file_images(file_path):
