@@ -13,6 +13,7 @@ def main():
     parser.add_argument("--model", type=str, default="depth_anything_v2", help="Model name")
     parser.add_argument("--encoder", type=str, default="vits", help="Encoder type (vits, vitb, vitl, vitg)")
     parser.add_argument("--max", type=int, default=None, help="max image count to evaluate")
+    parser.add_argument("--save", type=int, default=False, help="Save x amount of images and depths")
     args = parser.parse_args()
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -24,7 +25,7 @@ def main():
     model_fn = lambda img: model_callable(img, model)
     
     # Evaluate the model on the dataset.
-    metrics = evaluate_model_on_dataset(model_fn, dataset, max_images=args.max)
+    metrics = evaluate_model_on_dataset(model_fn, dataset, max_images=args.max, save_output=args.save)
     
     print("Aggregated error metrics:")
     for key, value in metrics.items():

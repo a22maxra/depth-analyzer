@@ -37,7 +37,7 @@ def extract_depth(depths_arr, index):
 
 def save_depth(depth, name="output_depth.png"):
     print("\nSaving depth map as ", name)
-    plt.imsave(name, depth, cmap='Spectral')
+    plt.imsave(name, depth, cmap='Spectral_r')
 
 def load_mat_dataset(file_path):
     import scipy.io
@@ -151,7 +151,7 @@ def compute_errors(gt_valid, pred_valid):
         "a3": a3
     }
 
-def evaluate_model_on_dataset(model, dataset, min_depth=0, max_depth=80.0, max_images=None):
+def evaluate_model_on_dataset(model, dataset, min_depth=0, max_depth=80.0, max_images=None, save_output=False):
     """
     Evaluate a monocular depth estimation model on a dataset that may include infinite depths.
     
@@ -181,8 +181,9 @@ def evaluate_model_on_dataset(model, dataset, min_depth=0, max_depth=80.0, max_i
     if max_images is not None:
         if max_images > len(images) or max_images <= 0:
             return {}
-        images = images[:max_images]
-        depths = depths[:max_images]
+        indices = np.random.choice(len(images), max_images, replace=False)
+        images = images[indices]
+        depths = depths[indices]
 
     for image, gt_depth in zip(images, depths):
         # Obtain model prediction
@@ -202,6 +203,10 @@ def evaluate_model_on_dataset(model, dataset, min_depth=0, max_depth=80.0, max_i
         # Compute errors for the current sample
         errors = compute_errors(gt_depth_valid, pred_depth_valid)
         errors_list.append(errors)
+
+        if save_output and len(errors_list) <= save_output:
+            save_depth(pred_output, name=f"./output/output_depth{len(errors_list)}.png")
+            save_image(image, name=f"./output/output_image{len(errors_list)}.png")
 
         # Print current progress (images so far)
         print(f"\rProcessed {len(errors_list)} images", end="")
