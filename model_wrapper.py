@@ -60,14 +60,22 @@ def load_model(model_name, device, encoder_choice='vitl'):
     if model_name == "depthpro":
         print("Loading Depth-PRO model")
         import depth_pro
+        import torch
+        from depth_pro.depth_pro import DepthProConfig
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-        depthpro_dir = os.path.join(project_root, 'ml-depth-pro')
+        depthpro_dir = os.path.join(project_root, 'ml-depth-pro', 'src')
         if depthpro_dir not in sys.path:
             sys.path.insert(0, depthpro_dir)
+        config = DepthProConfig(
+            patch_encoder_preset="dinov2l16_384",
+            image_encoder_preset="dinov2l16_384",
+            checkpoint_uri="./ml-depth-pro/checkpoints/depth_pro.pt",
+            decoder_features=256,
+            use_fov_head=True,
+            fov_encoder_preset="dinov2l16_384",
+        )
 
-        os.chdir(depthpro_dir)
-
-        model, transform = depth_pro.create_model_and_transforms()
+        model, transform = depth_pro.create_model_and_transforms(config=config, device=device)
         model.eval()
 
         return {"model": model, "transform": transform, "type": "depthpro"}
@@ -78,7 +86,7 @@ def load_model(model_name, device, encoder_choice='vitl'):
         import torch
         pipe = diffusers.MarigoldDepthPipeline.from_pretrained(
             "prs-eth/marigold-depth-lcm-v1-0", variant="fp16", torch_dtype=torch.float16
-        ).to("cuda")
+        ).to(device)
         return {"model": pipe, "type": "marigold"}
 
     else:
