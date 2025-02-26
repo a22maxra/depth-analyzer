@@ -127,6 +127,12 @@ def inverse_rel_depth_to_true_depth(depth_rel, depth_abs):
     true_depth = 1.0 / (A * depth_rel_norm + B)
     return true_depth
 
+def rel_depth_to_true_depth(depth_rel, depth_abs):
+    s, b = find_scale_shift(depth_abs, depth_rel)
+    true_depth = apply_scale_shift(depth_rel, s, b)
+    return true_depth
+
+
 def compute_errors(gt_valid, pred_valid):
 
     # Compute threshold ratios on the valid data
@@ -151,7 +157,7 @@ def compute_errors(gt_valid, pred_valid):
         "a3": a3
     }
 
-def evaluate_model_on_dataset(model, dataset, min_depth=0, max_depth=80.0, max_images=None, save_output=False):
+def evaluate_model_on_dataset(model, dataset, min_depth=0, max_depth=80.0, max_images=None, save_output=False, inverse=True):
     """
     Evaluate a monocular depth estimation model on a dataset that may include infinite depths.
     
@@ -175,7 +181,7 @@ def evaluate_model_on_dataset(model, dataset, min_depth=0, max_depth=80.0, max_i
             depth_map < max_depth
         ))
     
-    images = dataset["images"].transpose(3, 0, 1, 2)
+    images = dataset["images"].transpose(3, 0, 1, 2) # Should be (N, H, W, C)
     depths = dataset["depths"].transpose(2, 0, 1)
 
     if max_images is not None:
@@ -198,7 +204,11 @@ def evaluate_model_on_dataset(model, dataset, min_depth=0, max_depth=80.0, max_i
         pred_depth_valid = pred_output[gt_mask]
         gt_depth_valid = gt_depth[gt_mask]
 
-        pred_depth_valid = inverse_rel_depth_to_true_depth(pred_depth_valid, gt_depth_valid)
+        if inverse == True:
+            print(" Inverse was true")
+            pred_depth_valid = inverse_rel_depth_to_true_depth(pred_depth_valid, gt_depth_valid)
+        else:
+            pred_depth_valid = rel_depth_to_true_depth(pred_depth_valid, gt_depth_valid)
 
         # Compute errors for the current sample
         errors = compute_errors(gt_depth_valid, pred_depth_valid)
