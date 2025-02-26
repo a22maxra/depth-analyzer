@@ -1,11 +1,14 @@
 import argparse
-import cv2
 import glob
 import os
 import torch
 import numpy as np
 from image_helper import *
 import sys
+import tempfile
+from PIL import Image
+
+
 
 # Determine the project root (assuming helper/ is directly under /home/max/code)
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -41,9 +44,10 @@ def load_model(model_name, device, encoder_choice='vitl'):
         model.load_state_dict(torch.load(checkpoint_path, map_location='cpu'))
         model = model.to(device).eval()
         return model
+
     if model_name == "midas":
         print("Loading MiDaS model with encoder:", encoder_choice)
-        from midas.model_loader import default_models, load_model as midas_load_model
+        from midas.model_loader import load_model as midas_load_model
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         model_path = os.path.join(project_root, 'MiDaS', 'weights', f'{encoder_choice}.pt')
         if model_path is None:
@@ -52,6 +56,31 @@ def load_model(model_name, device, encoder_choice='vitl'):
         model, transform, net_w, net_h = midas_load_model(device, model_path, encoder_choice)
         # Return as a dictionary so we can later branch in inference.
         return {"model": model, "transform": transform, "net_w": net_w, "net_h": net_h, "type": "midas"}
+
+    if model_name == "depthpro":
+        print("Loading Depth-PRO model")
+        import depth_pro
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        depthpro_dir = os.path.join(project_root, 'ml-depth-pro')
+        if depthpro_dir not in sys.path:
+            sys.path.insert(0, depthpro_dir)
+
+        os.chdir(depthpro_dir)
+
+        model, transform = depth_pro.create_model_and_transforms()
+        model.eval()
+
+        return {"model": model, "transform": transform, "type": "depthpro"}
+    
+    if model_name == "marigold":
+        print("Loading Marigold model")
+        import diffusers
+        import torch
+        pipe = diffusers.MarigoldDepthPipeline.from_pretrained(
+            "prs-eth/marigold-depth-lcm-v1-0", variant="fp16", torch_dtype=torch.float16
+        ).to("cuda")
+        return {"model": pipe, "type": "marigold"}
+
     else:
         raise ValueError(f"Model {model_name} not implemented.")
 
@@ -84,7 +113,43 @@ def get_relative_depth(image, model):
                 mode="bicubic",
                 align_corners=False,
             ).squeeze().cpu().numpy()
-        return prediction
+        return prediction    
+    
+    elif isinstance(model, dict) and model.get("type") == "depthpro":
+        import depth_pro
+
+        pil_image = Image.fromarray(image)
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            temp_path = tmp.name
+            pil_image.save(temp_path)
+
+        loaded = model
+        tranform = loaded["transform"]
+        model = loaded["model"]
+
+        processed_image, _, f_px = depth_pro.load_rgb(temp_path)
+        processed_image = tranform(processed_image)
+
+        prediction = model.infer(processed_image, f_px=f_px)
+        depth = prediction["depth"]
+        if hasattr(depth, "cpu"):
+            depth = depth.cpu().numpy()
+
+        os.remove(temp_path)
+
+        return depth
+    
+    elif isinstance(model, dict) and model.get("type") == "marigold":
+        model = model["model"]
+        pil_image = Image.fromarray(image)
+
+        depth = model(pil_image)
+        depth = depth.prediction
+        depth = depth.transpose(1, 2, 0, 3)
+        depth = np.squeeze(depth)
+
+        return depth
+    
     else:
         # depth_anything_v2 branch
         return model.infer_image(image)
