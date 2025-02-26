@@ -157,7 +157,7 @@ def compute_errors(gt_valid, pred_valid):
         "a3": a3
     }
 
-def evaluate_model_on_dataset(model, dataset, min_depth=0, max_depth=80.0, max_images=None, save_output=False, inverse=True):
+def evaluate_model_on_dataset(model, dataset, min_depth=0, max_depth=80.0, max_images=None, save_output=False, inverse=True, relative=True):
     """
     Evaluate a monocular depth estimation model on a dataset that may include infinite depths.
     
@@ -204,11 +204,11 @@ def evaluate_model_on_dataset(model, dataset, min_depth=0, max_depth=80.0, max_i
         pred_depth_valid = pred_output[gt_mask]
         gt_depth_valid = gt_depth[gt_mask]
 
-        if inverse == True:
-            print(" Inverse was true")
-            pred_depth_valid = inverse_rel_depth_to_true_depth(pred_depth_valid, gt_depth_valid)
-        else:
-            pred_depth_valid = rel_depth_to_true_depth(pred_depth_valid, gt_depth_valid)
+        if relative == True:
+            if inverse == True:
+                pred_depth_valid = inverse_rel_depth_to_true_depth(pred_depth_valid, gt_depth_valid)
+            else:
+                pred_depth_valid = rel_depth_to_true_depth(pred_depth_valid, gt_depth_valid)
 
         # Compute errors for the current sample
         errors = compute_errors(gt_depth_valid, pred_depth_valid)
