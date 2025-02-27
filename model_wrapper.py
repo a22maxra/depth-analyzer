@@ -1,5 +1,4 @@
 import argparse
-import glob
 import os
 import torch
 import numpy as np
@@ -26,9 +25,10 @@ def load_model(model_name, device, encoder_choice='vitl'):
     Dynamically load a model based on the given name. Currently, only 'depth_anything_v2'
     is implemented.
     """
-    if model_name == "depth_anything_v2":
+    if model_name == "depthanythingv2":
         print("Loading Depth-Anything-V2 model with encoder:", encoder_choice)
         from depth_anything_v2.dpt import DepthAnythingV2
+        import torch
         model_configs = {
             'vits': {'encoder': 'vits', 'features': 64, 'out_channels': [48, 96, 192, 384]},
             'vitb': {'encoder': 'vitb', 'features': 128, 'out_channels': [96, 192, 384, 768]},
@@ -36,14 +36,13 @@ def load_model(model_name, device, encoder_choice='vitl'):
             'vitg': {'encoder': 'vitg', 'features': 384, 'out_channels': [1536, 1536, 1536, 1536]}
         }
         model = DepthAnythingV2(**model_configs[encoder_choice])
-        # Determine the project root; assuming model_wrapper.py is in /home/max/code/helper/
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         # Build the absolute path to the checkpoint inside the Depth-Anything-V2 folder.
         checkpoint_path = os.path.join(project_root, 'Depth-Anything-V2', 'checkpoints', f'depth_anything_v2_{encoder_choice}.pth')
         print("Loading checkpoint from:", checkpoint_path)
         model.load_state_dict(torch.load(checkpoint_path, map_location='cpu'))
         model = model.to(device).eval()
-        return model
+        return {"model": model, "type": "depthanythingv2"}
 
     if model_name == "midas":
         print("Loading MiDaS model with encoder:", encoder_choice)
@@ -88,6 +87,12 @@ def load_model(model_name, device, encoder_choice='vitl'):
             "prs-eth/marigold-depth-lcm-v1-0", variant="fp16", torch_dtype=torch.float16
         ).to(device)
         return {"model": pipe, "type": "marigold"}
+    
+    if model_name == "zoedepth":
+        from transformers import pipeline
+
+        pipe = pipeline(task="depth-estimation", model="Intel/zoedepth-nyu-kitti")
+        return {"model": pipe, "type": "zoedepth"}
 
     else:
         raise ValueError(f"Model {model_name} not implemented.")
@@ -155,12 +160,19 @@ def get_relative_depth(image, model):
         depth = depth.prediction
         depth = depth.transpose(1, 2, 0, 3)
         depth = np.squeeze(depth)
-
         return depth
     
-    else:
-        # depth_anything_v2 branch
+    elif isinstance(model, dict) and model.get("type") == "depthanythingv2":
+        model = model["model"]
         return model.infer_image(image)
+    
+    elif isinstance(model, dict) and model.get("type") == "zoedepth":
+        model = model["model"]
+        pil_image = Image.fromarray(image)
+        depth = model(pil_image)
+        depth = depth["predicted_depth"]
+        depth = np.array(depth)
+        return depth
 
 def model_callable(raw_image, model):
     """
