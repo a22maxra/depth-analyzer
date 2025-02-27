@@ -181,8 +181,10 @@ def evaluate_model_on_dataset(model, dataset, min_depth=0, max_depth=80.0, max_i
             depth_map < max_depth
         ))
     
-    images = dataset["images"].transpose(3, 0, 1, 2) # Should be (N, H, W, C)
-    depths = dataset["depths"].transpose(2, 0, 1)
+    images = dataset["images"]
+    depths = dataset["depths"]
+
+    print(f"\nEvaluating on {len(images)} images")
 
     if max_images is not None:
         if max_images > len(images) or max_images <= 0:
@@ -198,7 +200,7 @@ def evaluate_model_on_dataset(model, dataset, min_depth=0, max_depth=80.0, max_i
         gt_mask = create_valid_mask(gt_depth, min_depth, max_depth)
 
         if not np.any(gt_mask):
-            raise ValueError("No valid pixels in combined mask. Depth map is incorrect.")
+            raise ValueError("No valid pixels in mask. Depth map is incorrect.")
         
         # Only keep valid pixels for evaluation
         pred_depth_valid = pred_output[gt_mask]
