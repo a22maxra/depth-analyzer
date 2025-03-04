@@ -35,9 +35,10 @@ def extract_depth(depths_arr, index):
     print(f"Depth Value range:, {np.min(depth), np.max(depth)}")
     return depth
 
-def save_depth(depth, name="output_depth.png"):
+def save_depth(depth, name="output_depth.png", inverse=False, max_depth=80, min_depth=0.001):
     print("\nSaving depth map as ", name)
-    plt.imsave(name, depth, cmap='Spectral_r')
+    if inverse == True: plt.imsave(name, depth, cmap='Spectral_r', vmin=min_depth, vmax=max_depth)
+    if inverse == False: plt.imsave(name, depth, cmap='Spectral', vmin=min_depth, vmax=max_depth)
 
 def load_mat_dataset(file_path):
     import scipy.io
@@ -217,7 +218,9 @@ def evaluate_model_on_dataset(model, dataset, min_depth=0, max_depth=80.0, max_i
         errors_list.append(errors)
 
         if save_output and len(errors_list) <= save_output:
-            save_depth(pred_output, name=f"./output/output_depth{len(errors_list)}.png")
+            save_depth(pred_output, inverse=inverse, name=f"./output/output_depth{len(errors_list)}.png", max_depth=max_depth, min_depth=min_depth)
+            save_depth(np.where(gt_mask, pred_output, 0), inverse=inverse, name=f"./output/output_depth_masked{len(errors_list)}.png")
+            save_depth(gt_depth, name=f"./output/output_depth_gt{len(errors_list)}.png")
             save_image(image, name=f"./output/output_image{len(errors_list)}.png")
 
         # Print current progress (images so far)
