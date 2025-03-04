@@ -2,7 +2,7 @@ import os
 from PIL import Image
 import numpy as np
 
-def load_diode(base_dir='./datasets/diode/val'):
+def load_diode(max_images=None):
     """
     Recursively loads image-depth pairs from the Diode dataset.
     
@@ -19,12 +19,15 @@ def load_diode(base_dir='./datasets/diode/val'):
     Returns:
         dict: A dictionary with keys 'images' and 'depths', each a NumPy array.
     """
+    base_dir='./datasets/diode/val' 
     images_list = []
     depths_list = []
     
     # Walk through the directory tree under base_dir
     for root, dirs, files in os.walk(base_dir):
+        if max_images != None and max_images <= len(images_list): break
         for file in files:
+            if max_images != None and max_images <= len(images_list): break
             if file.endswith('.png'):
                 # Full path to the image
                 img_full_path = os.path.join(root, file)
@@ -44,11 +47,17 @@ def load_diode(base_dir='./datasets/diode/val'):
                     
                     # Load depth map from .npy file
                     depth_np = np.load(depth_full_path)
+                    depth_np = np.squeeze(depth_np)
+
+                    depth_mask_np = np.load(depth_mask_full_path)
+                    
+                    depth_np = np.multiply(depth_np, depth_mask_np)
                     
                     images_list.append(image_np)
                     depths_list.append(depth_np)
                     
-                    print(f"\rFound {len(images_list)} image-depth pairs...", end="")
+                    print(f"\rFound {len(images_list)}/ image-depth pairs...", end="")
+                
         
     # Stack lists into NumPy arrays. Make sure all images and depths share the same shape.
     images = np.stack(images_list, axis=0)

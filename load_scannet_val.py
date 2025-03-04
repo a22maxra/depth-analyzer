@@ -23,11 +23,12 @@ for line in lines:
 base_dir = './datasets/scannet/'
 
 
-def load_scannet():
+def load_scannet(max_images=None):
     depths_list = []
     images_list = []
     
     for img_path, depth_path in data_list:
+        if max_images != None and max_images <= len(images_list): break
         if depth_path != "None" and img_path != "None":
             img_full_path = os.path.join(base_dir, img_path)
             depth_full_path = os.path.join(base_dir, depth_path)
@@ -42,7 +43,7 @@ def load_scannet():
             depths_list.append(depth_decoded)
             images_list.append(image_np)
 
-            print(f"\rLoading scannet. Current image count: {len(images_list)}/800", end="")
+            print(f"\rLoading scannet. Current image count: {len(images_list)}/{len(data_list)}", end="")
 
 
     depths = np.stack(depths_list, axis=0)

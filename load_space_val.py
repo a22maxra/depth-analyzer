@@ -46,6 +46,8 @@ def load_in_space_type(max_images=None):
     image_files = sorted([f for f in files if f.endswith('_L.jpg')])
     
     for image_file in image_files:
+        if max_images != None and max_images <= len(images_list): break
+
         # Full path to the image file
         img_full_path = os.path.join(base_dir, image_file)
         # Construct corresponding depth file name:
@@ -69,8 +71,6 @@ def load_in_space_type(max_images=None):
         depths_list.append(depth_np)
         
         print(f"\rLoading in_space_type. Current image count: {len(images_list)}/{len(image_files)}", end="")
-        
-        if max_images != None and max_images > len(images_list): break
     
     images = np.stack(images_list, axis=0)
     depths = np.stack(depths_list, axis=0)

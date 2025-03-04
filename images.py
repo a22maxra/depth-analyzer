@@ -7,6 +7,7 @@ from model_wrapper import *
 from load_kitti_eigen_test import load_kitti
 from load_diode_val import load_diode
 from load_scannet_val import load_scannet
+from load_space_val import load_in_space_type
 
 
 def main():
@@ -33,22 +34,31 @@ def main():
         relative = True
 
     if args.dataset == "kitti":
-        dataset = load_kitti()
+        dataset = load_kitti(args.max)
+        dataset["name"] = "kitti"
         max_depth = 80.0
         min_depth = 0.001
     elif args.dataset == "nyu":
         dataset = load_mat_dataset("datasets/nyu/nyu_depth_v2_cropped_2")
+        dataset["name"] = "nyu"
         dataset["images"] = dataset["images"].transpose(3, 0, 1, 2) # Should be (N, H, W, C)
         dataset["depths"] = dataset["depths"].transpose(2, 0, 1)
         max_depth = 10.0
         min_depth = 0.001
     elif args.dataset == "diode":
-        dataset = load_diode()
+        dataset = load_diode(args.max)
+        dataset["name"] = "diode"
         max_depth = 350.0
         min_depth = 0.001
     elif args.dataset == "scannet":
-        dataset = load_scannet()
+        dataset = load_scannet(args.max)
+        dataset["name"] = "scannet"
         max_depth = 10.0
+        min_depth = 0.001
+    elif args.dataset == "space":
+        dataset = load_in_space_type(args.max)
+        dataset["name"] = "space"
+        max_depth = 20.0
         min_depth = 0.001
 
     # Print run settings
