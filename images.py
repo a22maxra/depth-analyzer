@@ -6,6 +6,7 @@ from scipy.io import loadmat
 from model_wrapper import *
 from load_kitti_eigen_test import load_kitti
 from load_diode_val import load_diode
+from load_scannet_val import load_scannet
 
 
 def main():
@@ -36,14 +37,18 @@ def main():
         max_depth = 80.0
         min_depth = 0.001
     elif args.dataset == "nyu":
-        dataset = load_mat_dataset("nyu_depth_v2_cropped")
+        dataset = load_mat_dataset("datasets/nyu/nyu_depth_v2_cropped_2")
         dataset["images"] = dataset["images"].transpose(3, 0, 1, 2) # Should be (N, H, W, C)
         dataset["depths"] = dataset["depths"].transpose(2, 0, 1)
         max_depth = 10.0
         min_depth = 0.001
     elif args.dataset == "diode":
         dataset = load_diode()
-        max_depth = 80.0
+        max_depth = 350.0
+        min_depth = 0.001
+    elif args.dataset == "scannet":
+        dataset = load_scannet()
+        max_depth = 10.0
         min_depth = 0.001
 
     # Print run settings
