@@ -39,11 +39,21 @@ def main():
         max_depth = 80.0
         min_depth = 0.001
     elif args.dataset == "nyu":
-        dataset = load_mat_dataset("datasets/nyu/nyu_depth_v2_cropped_2")
+        dataset = load_mat_dataset("datasets/nyu/nyu_depth_v2_processed")
         dataset["name"] = "nyu"
         dataset["images"] = dataset["images"].transpose(3, 0, 1, 2) # Should be (N, H, W, C)
         dataset["depths"] = dataset["depths"].transpose(2, 0, 1)
         max_depth = 10.0
+        min_depth = 0.001
+    elif args.dataset == "diodeout":
+        dataset = load_diode(args.max, scene_type="outdoor")
+        dataset["name"] = "diode"
+        max_depth = 80.0
+        min_depth = 0.001
+    elif args.dataset == "diodein":
+        dataset = load_diode(args.max,  scene_type="indoors")
+        dataset["name"] = "diode"
+        max_depth = 20.0
         min_depth = 0.001
     elif args.dataset == "diode":
         dataset = load_diode(args.max)
@@ -76,7 +86,7 @@ def main():
     # Evaluate the model on the dataset.
     metrics = evaluate_model_on_dataset(model_fn, dataset, max_depth=max_depth, min_depth=min_depth ,max_images=args.max, save_output=args.save, inverse=inverse, relative=relative)
     
-    print("Aggregated error metrics:")
+    print("\nAggregated error metrics:")
     for key, value in metrics.items():
         print(f"{key}: {value:.4f}")
 
