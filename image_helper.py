@@ -2,7 +2,8 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 from scipy.io import loadmat
-
+from PIL import Image
+import torch
 
 def load_mat_file_images(file_path):
     data = loadmat(file_path)
@@ -158,73 +159,157 @@ def compute_errors(gt_valid, pred_valid):
         "a3": a3
     }
 
-def evaluate_model_on_dataset(model, dataset, min_depth=0, max_depth=80.0, max_images=None, save_output=False, inverse=True, relative=True):
+def compute_scale_and_shift_np(prediction, target, mask):
     """
-    Evaluate a monocular depth estimation model on a dataset that may include infinite depths.
+    Compute optimal scale and shift for aligning predicted inverted depth to target.
+    prediction, target, and mask are 2D NumPy arrays.
+    """
+
+    a00 = np.sum(mask * prediction * prediction)
+    a01 = np.sum(mask * prediction)
+    a11 = np.sum(mask)
     
-    Parameters:
-      model: A callable that takes an input image and returns a prediction.
-      dataset: An iterable that yields (image, gt_depth) pairs, where gt_depth is a 2D numpy array.
-      do_convert (bool): If True, convert the model output assuming it is an inverse depth map.
-      min_depth (float): Minimum valid depth value.
-      max_depth (float): Maximum valid depth value.
-      use_median_scaling (bool): Whether to perform median scaling for each sample.
+    b0 = np.sum(mask * prediction * target)
+    b1 = np.sum(mask * target)
     
+    det = a00 * a11 - a01 * a01
+    if det <= 0:
+        scale = 1.0
+        shift = 0.0
+    else:
+        scale = (a11 * b0 - a01 * b1) / det
+        shift = (-a01 * b0 + a00 * b1) / det
+    return scale, shift
+
+def convert_inverted_to_depth_np(prediction, target, mask, depth_cap=10.0):
+    """
+    Converts predicted inverted relative depth (e.g. disparity) into absolute depth.
+    prediction: 2D NumPy array (inverted relative depth).
+    target: ground truth depth map (2D NumPy array).
+    mask: binary mask (2D NumPy array) where valid pixels are 1.
+    depth_cap: cap for the maximum depth (used to compute a minimum disparity).
     Returns:
-      dict: Aggregated error metrics across the dataset.
+      absolute_depth: 2D NumPy array of absolute depth.
     """
+    # Create target disparity: valid pixels get 1.0 / target depth.
+    target_disparity = np.zeros_like(target, dtype=np.float32)
+    valid = (mask == 1)
+    target_disparity[valid] = 1.0 / target[valid]
+    
+    # Compute optimal scale and shift from prediction to target disparity.
+    scale, shift = compute_scale_and_shift_np(prediction, target_disparity, mask)
+    
+    # Align prediction.
+    prediction_aligned = scale * prediction + shift
+    
+    # Cap the aligned disparity to avoid extremely small values.
+    disparity_cap = 1.0 / depth_cap
+    prediction_aligned[prediction_aligned < disparity_cap] = disparity_cap
+    
+    # Convert aligned disparity to absolute depth.
+    absolute_depth = 1.0 / prediction_aligned
+    return absolute_depth
+
+def convert_relative_to_depth_np(prediction, target, mask, depth_cap=10.0):
+    """
+    Converts predicted relative depth into absolute depth.
+    prediction: 2D NumPy array (relative depth).
+    target: ground truth depth map (2D NumPy array).
+    mask: binary mask (2D NumPy array) where valid pixels are 1.
+    Returns:
+      absolute_depth: 2D NumPy array of absolute depth.
+    """
+    # Compute optimal scale and shift from prediction to target disparity.
+    scale, shift = compute_scale_and_shift_np(prediction, target, mask)
+    
+    # Align prediction.
+    prediction_aligned = scale * prediction + shift
+    
+    return prediction_aligned
+
+def evaluate_model_on_dataset(model, dataset, min_depth_eval=0, max_depth_eval=80.0, relative=True, inverse=True, max_images=None, save_output=False):
+    images = dataset["images"]
+    gt_depths = dataset["depths"]
+    dataset_name = dataset["name"]
+    preds = []
     errors_list = []
 
-    def create_valid_mask(depth_map, min_depth, max_depth):
-        return np.logical_and.reduce((
-            np.isfinite(depth_map),
-            depth_map > min_depth,
-            depth_map < max_depth
-        ))
-    
-    images = dataset["images"]
-    depths = dataset["depths"]
-    dataset_name = dataset["name"]
-
-    print(f"\nEvaluating on {len(images)} images")
-
+    # Slice dataset if max image count is set
     if max_images is not None:
         if max_images > len(images) or max_images <= 0:
+            print(f"Max images was more than dataset count Max Images: {max_images} Image count: {len(images)}")
             return {}
         images = images[:max_images, :, :, :]
-        depths = depths[:max_images, :, :]
+        gt_depths = gt_depths[:max_images, :, :]
 
-    for image, gt_depth in zip(images, depths):
-        # Obtain model prediction
-        pred_output = model(image)
-        
-        gt_mask = create_valid_mask(gt_depth, min_depth, max_depth)
+  
 
-        if not np.any(gt_mask):
-            raise ValueError("No valid pixels in mask. Depth map is incorrect.")
-        
-        # Only keep valid pixels for evaluation
-        pred_depth_valid = pred_output[gt_mask]
-        gt_depth_valid = gt_depth[gt_mask]
+    # Prediction for each image
+    for image, gt in zip(images, gt_depths):
+        pred_depth = model(image)
+        preds.append(pred_depth)
+        print(f"\rPredicted {len(preds)}/{len(images)} images", end="")
+    
+    pred_depths = np.stack(preds, axis=0)
+    print(f"\nFinal shape of preds: Pred Depths: {pred_depths.shape}") 
+    for image, gt_depth, pred_depth in zip(images, gt_depths, pred_depths):
+        # Set infinite ground truth values to 0 (Will get cropped out by min_eval_depth)
+        gt_depth[np.isinf(gt_depth)] = 0
+        gt_depth[np.isnan(gt_depth)] = 0
 
+        # Mask for invalid values outside of min_depth_eval and max_depth_eval
+        valid_mask = np.logical_and(gt_depth > min_depth_eval, gt_depth < max_depth_eval)
+
+        gt_height, gt_width = gt_depth.shape
+        eval_mask = np.zeros(valid_mask.shape)
+
+        # if garg_crop:
+        #     eval_mask[int(0.40810811 * gt_height):int(0.99189189 * gt_height), int(0.03594771 * gt_width):int(0.96405229 * gt_width)] = 1
+
+        # Removes borders
+        if dataset_name == 'kitti':
+            # Kitti eigen crop
+            eval_mask[int(0.3324324 * gt_height):int(0.91351351 * gt_height), int(0.0359477 * gt_width):int(0.96405229 * gt_width)] = 1
+        elif dataset_name == "nyu":
+            # Nyu specific kitti eigen crop
+            eval_mask[45:471, 41:601] = 1
+        else:
+            eval_mask[:,:] = 1
+
+        # Combine masks to remove cropped parts from image and depth
+        valid_mask = np.logical_and(valid_mask, eval_mask)
+
+        # Inverse Relative and Relative depth maps are converted to metric depth (mask is applied)
         if relative == True:
             if inverse == True:
-                pred_depth_valid = inverse_rel_depth_to_true_depth(pred_depth_valid, gt_depth_valid)
+                pred_depth_metric  = convert_inverted_to_depth_np(pred_depth, gt_depth, valid_mask, depth_cap=max_depth_eval)
             else:
-                pred_depth_valid = rel_depth_to_true_depth(pred_depth_valid, gt_depth_valid)
+                #pred_depth_metric = rel_depth_to_true_depth(pred_depth[valid_mask], gt_depth[valid_mask])
+                pred_depth_metric = convert_relative_to_depth_np(pred_depth, gt_depth, valid_mask, depth_cap=max_depth_eval)
+        else:
+            pred_depth_metric = pred_depth[valid_mask]
 
-        # Compute errors for the current sample
-        errors = compute_errors(gt_depth_valid, pred_depth_valid)
+        # Set invalid values to max and min
+        pred_depth_metric[pred_depth_metric < min_depth_eval] = min_depth_eval
+        pred_depth_metric[pred_depth_metric > max_depth_eval] = max_depth_eval
+        pred_depth_metric[np.isinf(pred_depth_metric)] = max_depth_eval
+
+        errors = compute_errors(gt_depth[valid_mask], pred_depth_metric[valid_mask])
         errors_list.append(errors)
 
+        print("Min and max gt: ", gt_depth.min(), gt_depth.max())
+        print("Min and max pred: ", pred_depth_metric.min(), pred_depth_metric.max())
+
+        gt = gt_depth[valid_mask]
+
         if save_output and len(errors_list) <= save_output:
-            save_depth(pred_output, inverse=inverse, name=f"./output/{dataset_name}/output_depth{len(errors_list)}.png", max_depth=max_depth, min_depth=min_depth)
-            save_depth(np.where(gt_mask, pred_output, 0), inverse=inverse, name=f"./output/{dataset_name}/output_depth_masked{len(errors_list)}.png", max_depth=max_depth, min_depth=min_depth)
-            save_depth(gt_depth, name=f"./output/{dataset_name}/output_depth_gt{len(errors_list)}.png", max_depth=max_depth, min_depth=min_depth)
+            save_depth(pred_depth, inverse=inverse, name=f"./output/{dataset_name}/output_depth{len(errors_list)}.png", max_depth=pred_depth.max(), min_depth=pred_depth.min())
+            save_depth(np.where(valid_mask, pred_depth_metric, np.nan), name=f"./output/{dataset_name}/output_depth_masked{len(errors_list)}.png", max_depth=pred_depth_metric.max(), min_depth=pred_depth_metric.min())
+            save_depth(np.where(valid_mask, gt_depth, np.nan), name=f"./output/{dataset_name}/output_depth_gt{len(errors_list)}.png", max_depth=gt.max(), min_depth=gt.min())
             save_image(image, name=f"./output/{dataset_name}/output_image{len(errors_list)}.png")
 
-        # Print current progress (images so far)
-        print(f"\rProcessed {len(errors_list)} images", end="")
+        print(f"\rProcessed {len(errors_list)}/{len(images)} images", end="")
+
     aggregated_errors = {k: np.mean([e[k] for e in errors_list]) for k in errors_list[0].keys()}
-    
     return aggregated_errors
+
