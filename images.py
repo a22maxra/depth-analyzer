@@ -8,6 +8,7 @@ from load_kitti_eigen_test import load_kitti
 from load_diode_val import load_diode
 from load_scannet_val import load_scannet
 from load_space_val import load_in_space_type
+from load_eth3d_test import load_eth3d
 
 
 def main():
@@ -26,7 +27,7 @@ def main():
     if args.model == "depthpro" or args.model == "zoedepth":
         inverse = False
         relative = False
-    elif args.model == "midas":
+    elif args.model == "marigold":
         inverse = False
         relative = True
     elif args.model == "depthanythingv2" or args.model == "midas":
@@ -70,6 +71,11 @@ def main():
         dataset["name"] = "space"
         max_depth = 20.0
         min_depth = 0.001
+    elif args.dataset == "eth3d":
+        dataset = load_eth3d(args.max)
+        dataset["name"] = "eth3d"
+        max_depth = 75.0
+        min_depth = 0.001
 
     # Print run settings
     print(f"\nModel: {args.model}")
@@ -84,7 +90,7 @@ def main():
     model_fn = lambda img: model_callable(img, model)
     
     # Evaluate the model on the dataset.
-    metrics = evaluate_model_on_dataset(model_fn, dataset, max_depth=max_depth, min_depth=min_depth ,max_images=args.max, save_output=args.save, inverse=inverse, relative=relative)
+    metrics = evaluate_model_on_dataset(model_fn, dataset, min_depth_eval=min_depth, max_depth_eval=max_depth, relative=relative, inverse=inverse, max_images=args.max, save_output=args.save)
     
     print("\nAggregated error metrics:")
     for key, value in metrics.items():

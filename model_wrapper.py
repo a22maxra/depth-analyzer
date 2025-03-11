@@ -9,9 +9,7 @@ from PIL import Image
 
 
 
-# Determine the project root (assuming helper/ is directly under /home/max/code)
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-# Now add the folder that contains depth_anything_v2. In your case, it's in Depth-Anything-V2.
 depthanything_dir = os.path.join(project_root, 'Depth-Anything-V2')
 if depthanything_dir not in sys.path:
     sys.path.insert(0, depthanything_dir)
