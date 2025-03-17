@@ -7,27 +7,19 @@ import sys
 import tempfile
 from PIL import Image
 
-
-
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-depthanything_dir = os.path.join(project_root, 'Depth-Anything-V2')
-if depthanything_dir not in sys.path:
-    sys.path.insert(0, depthanything_dir)
-dametric_dir = os.path.join(project_root, 'Depth-Anything-V2', 'metric_depth')
-if dametric_dir not in sys.path:
-    sys.path.insert(0, dametric_dir)
-midas_dir = os.path.join(project_root, 'MiDaS')
-if midas_dir not in sys.path:
-    sys.path.insert(0, midas_dir)
-
 # Factory function to load a model based on the given name.
 def load_model(model_name, device, encoder_choice='vitl', epoch=5):
     """
     Dynamically load a model based on the given name. Currently, only 'depth_anything_v2'
     is implemented.
     """
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    
     if model_name == "depthanythingv2":
         print("Loading Depth-Anything-V2 model with encoder:", encoder_choice)
+        depthanything_dir = os.path.join(project_root, 'Depth-Anything-V2')
+        if depthanything_dir not in sys.path:
+            sys.path.insert(0, depthanything_dir)
         from depth_anything_v2.dpt import DepthAnythingV2
         import torch
         model_configs = {
@@ -47,6 +39,9 @@ def load_model(model_name, device, encoder_choice='vitl', epoch=5):
     
     if model_name == "dametric":
         print("Loading metric (finetuned on KITTI) Depth-Anything-V2 model with encoder:", encoder_choice)
+        dametric_dir = os.path.join(project_root, 'Depth-Anything-V2', 'metric_depth')
+        if dametric_dir not in sys.path:
+            sys.path.insert(0, dametric_dir)
         from depth_anything_v2.dpt import DepthAnythingV2
         import torch
         model_configs = {
@@ -69,6 +64,9 @@ def load_model(model_name, device, encoder_choice='vitl', epoch=5):
 
     if model_name == "midas":
         print("Loading MiDaS model with encoder:", encoder_choice)
+        midas_dir = os.path.join(project_root, 'MiDaS')
+        if midas_dir not in sys.path:
+            sys.path.insert(0, midas_dir)
         from midas.model_loader import load_model as midas_load_model
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         model_path = os.path.join(project_root, 'MiDaS', 'weights', f'{encoder_choice}.pt')
