@@ -13,12 +13,15 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 depthanything_dir = os.path.join(project_root, 'Depth-Anything-V2')
 if depthanything_dir not in sys.path:
     sys.path.insert(0, depthanything_dir)
+dametric_dir = os.path.join(project_root, 'Depth-Anything-V2', 'metric_depth')
+if dametric_dir not in sys.path:
+    sys.path.insert(0, dametric_dir)
 midas_dir = os.path.join(project_root, 'MiDaS')
 if midas_dir not in sys.path:
     sys.path.insert(0, midas_dir)
 
 # Factory function to load a model based on the given name.
-def load_model(model_name, device, encoder_choice='vitl'):
+def load_model(model_name, device, encoder_choice='vitl', epoch=5):
     """
     Dynamically load a model based on the given name. Currently, only 'depth_anything_v2'
     is implemented.
@@ -41,6 +44,28 @@ def load_model(model_name, device, encoder_choice='vitl'):
         model.load_state_dict(torch.load(checkpoint_path, map_location='cpu'))
         model = model.to(device).eval()
         return {"model": model, "type": "depthanythingv2"}
+    
+    if model_name == "dametric":
+        print("Loading metric (finetuned on KITTI) Depth-Anything-V2 model with encoder:", encoder_choice)
+        from depth_anything_v2.dpt import DepthAnythingV2
+        import torch
+        model_configs = {
+            'vits': {'encoder': 'vits', 'features': 64, 'out_channels': [48, 96, 192, 384]},
+            'vitb': {'encoder': 'vitb', 'features': 128, 'out_channels': [96, 192, 384, 768]},
+            'vitl': {'encoder': 'vitl', 'features': 256, 'out_channels': [256, 512, 1024, 1024]},
+        }
+        model = DepthAnythingV2(**{**model_configs[encoder_choice], 'max_depth': 80.0})
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        # Build the absolute path to the checkpoint inside the Depth-Anything-V2 folder.
+        checkpoint_path = os.path.join(project_root, 'Depth-Anything-V2', 'metric_depth', 'exp', 'kitti', f'checkpoint_epoch_{epoch}.pth')
+        print("Loading checkpoint from:", checkpoint_path)
+        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        my_state_dict = {}
+        for key in checkpoint['model'].keys():
+            my_state_dict[key.replace('module.', '')] = checkpoint['model'][key]
+        model.load_state_dict(my_state_dict)
+        model = model.to(device).eval()
+        return {"model": model, "type": "dametric"}
 
     if model_name == "midas":
         print("Loading MiDaS model with encoder:", encoder_choice)
@@ -160,7 +185,7 @@ def get_relative_depth(image, model):
         depth = np.squeeze(depth)
         return depth
     
-    elif isinstance(model, dict) and model.get("type") == "depthanythingv2":
+    elif isinstance(model, dict) and model.get("type") == "depthanythingv2" or model.get("type") == "dametric":
         model = model["model"]
         return model.infer_image(image)
     

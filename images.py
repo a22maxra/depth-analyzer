@@ -19,12 +19,13 @@ def main():
     parser.add_argument("--encoder", type=str, default="Default", help="Encoder type (vits, vitb, vitl, vitg)")
     parser.add_argument("--max", type=int, default=None, help="max image count to evaluate")
     parser.add_argument("--save", type=int, default=False, help="Save x amount of images and depths")
+    parser.add_argument("--epoch", type=int, default=None, help="Set an epoch for fine tuned model")
     args = parser.parse_args()
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = load_model(args.model, device, encoder_choice=args.encoder)
+    model = load_model(args.model, device, encoder_choice=args.encoder, epoch=args.epoch)
 
-    if args.model == "depthpro" or args.model == "zoedepth":
+    if args.model == "depthpro" or args.model == "zoedepth" or args.model == "dametric":
         inverse = False
         relative = False
     elif args.model == "marigold":
@@ -50,17 +51,17 @@ def main():
         dataset = load_diode(args.max, scene_type="outdoor")
         dataset["name"] = "diode"
         max_depth = 80.0
-        min_depth = 0.001
+        min_depth = 10.0
     elif args.dataset == "diodein":
         dataset = load_diode(args.max,  scene_type="indoors")
         dataset["name"] = "diode"
         max_depth = 20.0
-        min_depth = 0.001
+        min_depth = 0.6
     elif args.dataset == "diode":
         dataset = load_diode(args.max)
         dataset["name"] = "diode"
-        max_depth = 350.0
-        min_depth = 0.001
+        max_depth = 100.0
+        min_depth = 0.6
     elif args.dataset == "scannet":
         dataset = load_scannet(args.max)
         dataset["name"] = "scannet"
@@ -85,6 +86,7 @@ def main():
     print(f"Save output: {args.save}")
     print(f"Inverse depth: {inverse}")
     print(f"Relative depth: {relative}")
+    if args.epoch: print(f"Testing model with epoch number {args.epoch}\n")
     
     # Create a callable for the model.
     model_fn = lambda img: model_callable(img, model)
