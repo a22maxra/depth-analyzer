@@ -114,6 +114,22 @@ def load_model(model_name, device, encoder_choice='vitl', epoch=5):
 
         pipe = pipeline(task="depth-estimation", model="Intel/zoedepth-nyu-kitti")
         return {"model": pipe, "type": "zoedepth"}
+    
+    if model_name == "unidepthv2":
+        unidepth_dir = os.path.join(project_root, 'UniDepth')
+        if unidepth_dir not in sys.path:
+            sys.path.insert(0, unidepth_dir)
+        import torch
+        from unidepth.models import UniDepthV2
+        model_id = f"unidepth-v2-vit{encoder_choice}14"
+        print(f"Loading UniDepthV2 model from: lpiccinelli/{model_id}")
+        model = UniDepthV2.from_pretrained(f"lpiccinelli/{model_id}")
+        model.interpolation_mode = "bilinear"
+        model = model.to(device).eval()
+        
+        # Return the model dictionary
+        return {"model": model, "type": "unidepthv2"}
+
 
     else:
         raise ValueError(f"Model {model_name} not implemented.")
@@ -193,6 +209,13 @@ def get_relative_depth(image, model):
         depth = model(pil_image)
         depth = depth["predicted_depth"]
         depth = np.array(depth)
+        return depth
+    
+    elif isinstance(model, dict) and model.get("type") == "unidepthv2":
+        model = model["model"]
+        rgb = torch.from_numpy(np.array(image)).permute(2, 0, 1)
+        predictions = model.infer(rgb)
+        depth = predictions["depth"].squeeze().cpu().numpy()
         return depth
 
 def model_callable(raw_image, model):

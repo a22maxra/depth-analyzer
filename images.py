@@ -25,7 +25,7 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = load_model(args.model, device, encoder_choice=args.encoder, epoch=args.epoch)
 
-    if args.model == "depthpro" or args.model == "zoedepth" or args.model == "dametric":
+    if args.model == "depthpro" or args.model == "zoedepth" or args.model == "dametric" or args.model == "unidepthv2":
         inverse = False
         relative = False
     elif args.model == "marigold":
@@ -50,8 +50,8 @@ def main():
     elif args.dataset == "diodeout":
         dataset = load_diode(args.max, scene_type="outdoor")
         dataset["name"] = "diode"
-        max_depth = 80.0
-        min_depth = 10.0
+        max_depth = 100.0
+        min_depth = 0.6
     elif args.dataset == "diodein":
         dataset = load_diode(args.max,  scene_type="indoors")
         dataset["name"] = "diode"
