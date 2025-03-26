@@ -9,6 +9,7 @@ from load_diode_val import load_diode
 from load_scannet_val import load_scannet
 from load_space_val import load_in_space_type
 from load_eth3d_test import load_eth3d
+from load_wuav import load_wuav
 
 
 def main():
@@ -25,7 +26,7 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = load_model(args.model, device, encoder_choice=args.encoder, epoch=args.epoch)
 
-    if args.model == "depthpro" or args.model == "zoedepth" or args.model == "dametric" or args.model == "unidepthv2":
+    if args.model == "depthpro" or args.model == "zoedepth" or args.model == "dametric" or args.model.startswith("unidepth"):
         inverse = False
         relative = False
     elif args.model == "marigold":
@@ -77,6 +78,14 @@ def main():
         dataset["name"] = "eth3d"
         max_depth = 75.0
         min_depth = 0.001
+    elif args.dataset == "wuav":
+        dataset = load_wuav(args.max)
+        dataset["name"] = "wuav"
+        max_depth = 80.0
+        min_depth = 0.001
+    elif args.dataset == "katt":
+        model_name = args.model
+        
 
     # Print run settings
     print(f"\nModel: {args.model}")

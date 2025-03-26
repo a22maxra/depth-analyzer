@@ -19,7 +19,7 @@ def load_diode(max_images=None, scene_type=None):
     Returns:
         dict: A dictionary with keys 'images' and 'depths', each a NumPy array.
     """
-    base_dir='./datasets/diode/val' 
+    base_dir='./datasets/diode' 
     images_list = []
     depths_list = []
     
@@ -70,7 +70,6 @@ def load_diode(max_images=None, scene_type=None):
     # Stack lists into NumPy arrays. Make sure all images and depths share the same shape.
     images = np.stack(images_list, axis=0)
     depths = np.stack(depths_list, axis=0)
-    depths = np.squeeze(depths) # Remove the last dimension
     
     print("Shape of images array:", images.shape)
     print("Shape of depths array:", depths.shape)

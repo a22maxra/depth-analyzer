@@ -181,7 +181,7 @@ def compute_scale_and_shift_np(prediction, target, mask):
         shift = (-a01 * b0 + a00 * b1) / det
     return scale, shift
 
-def convert_inverted_to_depth_np(prediction, target, mask, depth_cap=10.0):
+def convert_inverted_to_depth_np(prediction, target, mask, depth_cap):
     """
     Converts predicted inverted relative depth (e.g. disparity) into absolute depth.
     prediction: 2D NumPy array (inverted relative depth).
@@ -270,7 +270,7 @@ def evaluate_model_on_dataset(model, dataset, min_depth_eval=0, max_depth_eval=8
         if dataset_name == 'kitti':
             # Kitti eigen crop
             eval_mask[int(0.3324324 * gt_height):int(0.91351351 * gt_height), int(0.0359477 * gt_width):int(0.96405229 * gt_width)] = 1
-        elif dataset_name == "nyu":
+        elif dataset_name == "nyu" or dataset_name.startswith("diode"):
             # Nyu specific kitti eigen crop
             eval_mask[45:471, 41:601] = 1
         else:
@@ -287,7 +287,7 @@ def evaluate_model_on_dataset(model, dataset, min_depth_eval=0, max_depth_eval=8
                 #pred_depth_metric = rel_depth_to_true_depth(pred_depth[valid_mask], gt_depth[valid_mask])
                 pred_depth_metric = convert_relative_to_depth_np(pred_depth, gt_depth, valid_mask, depth_cap=max_depth_eval)
         else:
-            pred_depth_metric = pred_depth[valid_mask]
+            pred_depth_metric = pred_depth
 
         # Set invalid values to max and min
         pred_depth_metric[pred_depth_metric < min_depth_eval] = min_depth_eval
@@ -296,9 +296,6 @@ def evaluate_model_on_dataset(model, dataset, min_depth_eval=0, max_depth_eval=8
 
         errors = compute_errors(gt_depth[valid_mask], pred_depth_metric[valid_mask])
         errors_list.append(errors)
-
-        print("Min and max gt: ", gt_depth.min(), gt_depth.max())
-        print("Min and max pred: ", pred_depth_metric.min(), pred_depth_metric.max())
 
         gt = gt_depth[valid_mask]
 
@@ -313,3 +310,6 @@ def evaluate_model_on_dataset(model, dataset, min_depth_eval=0, max_depth_eval=8
     aggregated_errors = {k: np.mean([e[k] for e in errors_list]) for k in errors_list[0].keys()}
     return aggregated_errors
 
+def generate_depth_map(model, np_image, inverse, model_name):
+    pred_depth = model(np_image)
+    save_depth(pred_depth, inverse=inverse, name=f"./output/katt/katt_{model_name}.png", max_depth=pred_depth.max(), min_depth=pred_depth.min())
