@@ -26,7 +26,7 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = load_model(args.model, device, encoder_choice=args.encoder, epoch=args.epoch)
 
-    if args.model == "depthpro" or args.model == "zoedepth" or args.model == "dametric" or args.model.startswith("unidepth"):
+    if args.model == "depthpro" or args.model.startswith("zoe") or args.model == "dametric" or args.model.startswith("unidepth"):
         inverse = False
         relative = False
     elif args.model == "marigold":
@@ -85,7 +85,10 @@ def main():
         min_depth = 0.001
     elif args.dataset == "katt":
         model_name = args.model
-        
+        inverse = inverse
+        # Load the image as np /mnt/mh_grupp/datasets/katt/20240618_184059.jpg
+        image = Image.open("/mnt/mh_grupp/datasets/katt/combi_01.jpeg").convert('RGB')
+        image_np = np.array(image)
 
     # Print run settings
     print(f"\nModel: {args.model}")
@@ -99,6 +102,10 @@ def main():
     
     # Create a callable for the model.
     model_fn = lambda img: model_callable(img, model)
+
+    if args.dataset == "katt":
+        generate_depth_map(model_fn, image_np, inverse, model_name)
+        return
     
     # Evaluate the model on the dataset.
     metrics = evaluate_model_on_dataset(model_fn, dataset, min_depth_eval=min_depth, max_depth_eval=max_depth, relative=relative, inverse=inverse, max_images=args.max, save_output=args.save)

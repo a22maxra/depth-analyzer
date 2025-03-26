@@ -1,6 +1,7 @@
 import argparse
 import os
 import torch
+import torch.nn as nn
 import numpy as np
 from image_helper import *
 import sys
@@ -14,7 +15,7 @@ def load_model(model_name, device, encoder_choice='vitl', epoch=5):
     is implemented.
     """
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    
+
     if model_name == "depthanythingv2":
         print("Loading Depth-Anything-V2 model with encoder:", encoder_choice)
         depthanything_dir = os.path.join(project_root, 'Depth-Anything-V2')
@@ -36,7 +37,7 @@ def load_model(model_name, device, encoder_choice='vitl', epoch=5):
         model.load_state_dict(torch.load(checkpoint_path, map_location='cpu'))
         model = model.to(device).eval()
         return {"model": model, "type": "depthanythingv2"}
-    
+
     if model_name == "dametric":
         print("Loading metric (finetuned on KITTI) Depth-Anything-V2 model with encoder:", encoder_choice)
         dametric_dir = os.path.join(project_root, 'Depth-Anything-V2', 'metric_depth')
@@ -99,7 +100,7 @@ def load_model(model_name, device, encoder_choice='vitl', epoch=5):
         model.eval()
 
         return {"model": model, "transform": transform, "type": "depthpro"}
-    
+
     if model_name == "marigold":
         print("Loading Marigold model")
         import diffusers
@@ -108,13 +109,29 @@ def load_model(model_name, device, encoder_choice='vitl', epoch=5):
             "prs-eth/marigold-depth-lcm-v1-0", variant="fp16", torch_dtype=torch.float16
         ).to(device)
         return {"model": pipe, "type": "marigold"}
-    
+
     if model_name == "zoedepth":
         from transformers import pipeline
 
         pipe = pipeline(task="depth-estimation", model="Intel/zoedepth-nyu-kitti")
         return {"model": pipe, "type": "zoedepth"}
-    
+
+    if model_name == "zoeft":
+        zoe_dir = os.path.join(project_root, 'ZoeDepth')
+        if zoe_dir not in sys.path:
+            sys.path.insert(0, zoe_dir)
+        from zoedepth.models.builder import build_model
+        from zoedepth.utils.config import get_config
+
+        dataset = "kitti"
+        pretrained_resource=f"local::/mnt/mh_grupp/ZoeDepth/trained_checkpoints/ZoeDepthv1_25-Mar_15-28-d5a0bf3b51e0_epoch_{epoch}.pt"
+        overwrite = {"pretrained_resource": pretrained_resource}
+
+        config = get_config("zoedepth", "eval", dataset, **overwrite)
+        model_zoe_ft = build_model(config)
+        model_zoe_ft.to(device).eval()
+        return {"model": model_zoe_ft, "type": "zoeft"}
+
     if model_name == "unidepthv1":
         unidepth_dir = os.path.join(project_root, 'UniDepth')
         if unidepth_dir not in sys.path:
@@ -125,10 +142,8 @@ def load_model(model_name, device, encoder_choice='vitl', epoch=5):
         print(f"Loading UniDepthV1 model from: lpiccinelli/{model_id}")
         model = UniDepthV1.from_pretrained(f"lpiccinelli/{model_id}")
         model = model.to(device).eval()
-        
-        # Return the model dictionary
         return {"model": model, "type": "unidepthv1"}
-    
+
     if model_name == "unidepthv2":
         unidepth_dir = os.path.join(project_root, 'UniDepth')
         if unidepth_dir not in sys.path:
@@ -140,26 +155,8 @@ def load_model(model_name, device, encoder_choice='vitl', epoch=5):
         model = UniDepthV2.from_pretrained(f"lpiccinelli/{model_id}")
         model.interpolation_mode = "bilinear"
         model = model.to(device).eval()
-        
-        # Return the model dictionary
         return {"model": model, "type": "unidepthv2"}
 
-    if model_name == "metric3d":
-        metric3d_dir = os.path.join(project_root, 'Metric3D')
-        if metric3d_dir not in sys.path:
-            sys.path.insert(0, metric3d_dir)
-            
-        import torch
-        from unidepth.models import UniDepthV2
-        model_id = f"unidepth-v2-vit{encoder_choice}14"
-        print(f"Loading UniDepthV2 model from: lpiccinelli/{model_id}")
-        model = UniDepthV2.from_pretrained(f"lpiccinelli/{model_id}")
-        model.interpolation_mode = "bilinear"
-        model = model.to(device).eval()
-        
-        # Return the model dictionary
-        return {"model": model, "type": "unidepthv2"}
-    
     else:
         raise ValueError(f"Model {model_name} not implemented.")
 
@@ -192,8 +189,8 @@ def get_relative_depth(image, model):
                 mode="bicubic",
                 align_corners=False,
             ).squeeze().cpu().numpy()
-        return prediction    
-    
+        return prediction
+
     elif isinstance(model, dict) and model.get("type") == "depthpro":
         import depth_pro
 
@@ -217,7 +214,7 @@ def get_relative_depth(image, model):
         os.remove(temp_path)
 
         return depth
-    
+
     elif isinstance(model, dict) and model.get("type") == "marigold":
         model = model["model"]
         pil_image = Image.fromarray(image)
@@ -227,11 +224,11 @@ def get_relative_depth(image, model):
         depth = depth.transpose(1, 2, 0, 3)
         depth = np.squeeze(depth)
         return depth
-    
+
     elif isinstance(model, dict) and model.get("type") == "depthanythingv2" or model.get("type") == "dametric":
         model = model["model"]
         return model.infer_image(image)
-    
+
     elif isinstance(model, dict) and model.get("type") == "zoedepth":
         model = model["model"]
         pil_image = Image.fromarray(image)
@@ -240,13 +237,43 @@ def get_relative_depth(image, model):
         depth = np.array(depth)
         return depth
 
+    elif isinstance(model, dict) and model.get("type") == "zoeft":
+        model = model["model"]
+        device = next(model.parameters()).device
+
+        # Store original size for later interpolation
+        original_size = (image.shape[0], image.shape[1])  # (H, W)
+        
+        # Preprocess image
+        image = image.astype(np.float32) / 255.0
+        image = np.expand_dims(image, axis=0)  # Add batch dimension
+        image = np.transpose(image, (0, 3, 1, 2))  # NHWC -> NCHW
+        image = torch.from_numpy(image).float().to(device)
+        print("Image shape:", image.shape)
+
+        with torch.no_grad():
+            depth = model(image)
+            depth = depth["metric_depth"]  # Shape: (B, H, W)
+
+            if depth.ndim == 2:
+                depth = depth.unsqueeze(0).unsqueeze(0)  # Shape: (1, 1, H, W)
+            elif depth.ndim == 3:
+                depth = depth.unsqueeze(1)  # Shape: (B, 1, H, W)
+            depth = nn.functional.interpolate(
+                depth, (original_size[0], original_size[1]), mode='bilinear', align_corners=True)
+
+            # Move to CPU and convert to numpy
+            depth = depth.cpu().detach().numpy().squeeze()
+
+        return depth
+
     elif isinstance(model, dict) and model.get("type") == "unidepthv1":
         model = model["model"]
         rgb = torch.from_numpy(np.array(image)).permute(2, 0, 1)
         predictions = model.infer(rgb)
         depth = predictions["depth"].squeeze().cpu().numpy()
         return depth
-    
+
     elif isinstance(model, dict) and model.get("type") == "unidepthv2":
         model = model["model"]
         rgb = torch.from_numpy(np.array(image)).permute(2, 0, 1)
